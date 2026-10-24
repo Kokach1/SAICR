@@ -1,0 +1,40 @@
+{
+  "format_version": "1",
+  "run_id": "",
+  "revision": {
+    "mode": "workspace",
+    "base": "161ccfd4dab56c77a399762c61dc8992b556f387",
+    "target": null,
+    "identity": "274e93611473e84d453f44da5270ff23ec5aeac2ff84f2cbace322e79e398d1c"
+  },
+  "findings": [],
+  "decisions": [
+    {
+      "path": "example.py",
+      "included": true,
+      "reason": "included"
+    }
+  ],
+  "redactions": [],
+  "bundle_errors": [],
+  "usage": {
+    "entries": [],
+    "known_input": 0,
+    "known_output": 0,
+    "complete": true
+  },
+  "cost": {
+    "amount": null,
+    "currency": null,
+    "reason": "preview",
+    "complete": false,
+    "as_of": null,
+    "omitted_charges": "Taxes, infrastructure and provider-specific charges excluded"
+  },
+  "partial": false,
+  "warnings": [
+    "No model request was made.",
+    "AI findings require human review; a clean report is not proof of safety.",
+    "Deletion-only defects are out of scope."
+  ]
+}

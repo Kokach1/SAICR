@@ -1,0 +1,10 @@
+Observed on 2026-10-24 before 16:28:28 UTC, Windows / Python 3.14.0.
+Command: python fixtures/prepare_demo.py
+Expected: prepare or verify a synthetic local Git fixture; actual: existing synthetic fixture verified without modification, exit 0. Fresh fixture recreation was also exercised by test_t02_recreate_demo_fixture.
+Command: python -m pytest -q > evidence/test-output.txt
+Expected: deterministic local mocked fixture tests pass; actual: 28 passed in 24.92s, exit 0.
+Command: python -m pytest -q tests/test_pipeline.py::test_t12_cli_export_and_resume_with_mock_http > evidence/mock-export-resume.txt
+Expected: mock CLI export and exact resume; actual: 1 passed in 2.47s, exit 0.
+Command: python -m reviewdesk preview --repo fixtures/demo --format json > evidence/preview.json
+Expected: local no-network preview; actual: JSON preview with one included path, exit 0.
+No paid or hosted calls. The fixture working-tree change is intentional.
