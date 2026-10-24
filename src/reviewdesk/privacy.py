@@ -7,23 +7,33 @@ from .contracts import (ApprovedPayload, Change, Checkpoint, EndpointPolicy, Exc
                         Redaction, RunResult, SafeDocument)
 from .selection import safe_label, sensitive
 
-VERSION = "scanner-1"
+VERSION = "scanner-2"
 PATTERNS = (
     ("api_key", re.compile(r"(?i)\b(?:sk-[a-z0-9_-]{12,}|gh[pousr]_[a-z0-9_]{12,}|github_pat_[a-z0-9_]{12,}|AKIA[0-9A-Z]{16})\b")),
-    ("assignment", re.compile(r"(?i)\b(?:password|passwd|api[_-]?key|secret|token)\s*[:=]\s*['\"]?[^\s'\",;]{8,}")),
+    ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b")),
+    ("slack_token", re.compile(r"\bxox[bp]-(?:[A-Za-z0-9]+-){1,3}[A-Za-z0-9]{12,}\b")),
+    ("stripe_live", re.compile(r"\b(?:sk_live|rk_live)_[A-Za-z0-9]{16,}\b")),
+    ("google_api", re.compile(r"\bAIza[A-Za-z0-9_-]{35}\b")),
+    ("database_url", re.compile(
+        r"(?i)\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|rediss?):"
+        r"//[^\s/@:'\"\\]*:[^\s/@'\"\\]+@[^\s'\"\\]+")),
+    ("assignment", re.compile(r"(?i)\b(?:password|passwd|api[_-]?key|secret|token"
+                              r"|aws_secret_access_key)\s*[:=]\s*['\"]?[^\s'\",;]{8,}")),
 )
 PRIVATE = re.compile(r"-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----", re.I)
 SUSPICIOUS = re.compile(r"(?i)\b(?:authorization\s*:\s*bearer\s+\S+|-----BEGIN [^-]*PRIVATE KEY-----)")
 LOCAL_PATH = re.compile(r"(?:[A-Za-z]:[\\/]|file://|/(?:Users|home)/[^\s]+)")
 
 
-def _redact(text: str, path: str, redactions: list[Redaction]) -> str:
+def _redact(text: str, path: str, redactions: list[Redaction],
+            line_numbers: dict[int, int] | None = None) -> str:
     if PRIVATE.search(text):
         raise ValueError("private_key")
     for name, pattern in PATTERNS:
         matches = list(pattern.finditer(text))
         for match in matches:
-            line = text.count("\n", 0, match.start()) + 1
+            offset = text.count("\n", 0, match.start()) + 1
+            line = line_numbers.get(offset, offset) if line_numbers else offset
             redactions.append(Redaction(path=safe_label(path), line=line,
                                         rule_id=name, action="redacted"))
         text = pattern.sub("[REDACTED]", text)
@@ -39,9 +49,18 @@ def sanitize_file(change: Change, content: bytes) -> SafeDocument | Excluded:
     try:
         text = content.decode("utf-8")
         patch = "".join(h.patch for h in change.hunks)
+        patch_lines = {}
+        offset = 0
+        for hunk in change.hunks:
+            current = hunk.new_start
+            for line in hunk.patch.splitlines(keepends=True):
+                patch_lines[offset + 1] = current
+                offset += 1
+                if line.startswith(("+", " ")):
+                    current += 1
         redactions: list[Redaction] = []
         clean_content = _redact(text, path, redactions)
-        clean_patch = _redact(patch, path, redactions)
+        clean_patch = _redact(patch, path, redactions, patch_lines)
     except (UnicodeError, ValueError):
         return Excluded(path=safe_label(path), reason="unsafe_content")
     return SafeDocument(path=path, content=clean_content, patch=clean_patch,
@@ -56,12 +75,35 @@ def gate_payload(body: bytes, policy: EndpointPolicy) -> ApprovedPayload:
         raise ValueError("Request not approved or too large")
     try:
         text = body.decode("utf-8")
-        json.loads(text)
+        document = json.loads(text)
     except (UnicodeError, ValueError) as exc:
         raise ValueError("Invalid request body") from exc
-    if PRIVATE.search(text) or SUSPICIOUS.search(text) or any(p.search(text) for _, p in PATTERNS):
+    if _has_residual(text) or _has_residual(document):
         raise ValueError("Request failed final privacy scan")
     return ApprovedPayload(body=body, endpoint=policy.base_url + "/chat/completions")
+
+
+def _has_residual(value: object, depth: int = 0) -> bool:
+    if depth > 32:
+        return True
+    if isinstance(value, str):
+        if PRIVATE.search(value) or SUSPICIOUS.search(value) or any(
+                pattern.search(value) for _, pattern in PATTERNS):
+            return True
+        if value.lstrip().startswith(("{", "[")):
+            try:
+                return _has_residual(json.loads(value), depth + 1)
+            except ValueError:
+                pass
+        return False
+    if isinstance(value, dict):
+        return any(_has_residual(key, depth + 1) or _has_residual(item, depth + 1)
+                   or (isinstance(key, str) and isinstance(item, str)
+                       and _has_residual(f"{key} = {item}", depth + 1))
+                   for key, item in value.items())
+    if isinstance(value, list):
+        return any(_has_residual(item, depth + 1) for item in value)
+    return False
 
 
 def sanitize_output(value: RunResult | Checkpoint) -> RunResult | Checkpoint:
@@ -84,5 +126,10 @@ def sanitize_output(value: RunResult | Checkpoint) -> RunResult | Checkpoint:
 
 
 def _unsafe(text: str) -> bool:
-    return bool(PRIVATE.search(text) or SUSPICIOUS.search(text) or LOCAL_PATH.search(text)
-                or any(p.search(text) for _, p in PATTERNS))
+    if _has_residual(text) or LOCAL_PATH.search(text):
+        return True
+    try:
+        decoded = json.loads(text)
+    except ValueError:
+        return False
+    return _has_residual(decoded)

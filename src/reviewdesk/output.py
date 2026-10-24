@@ -127,6 +127,13 @@ def main(argv: list[str] | None = None) -> int:
         state = Checkpoint.model_validate_json(path.read_bytes())
         print(json.dumps({"run_id": state.run_id, "complete": state.complete,
                           "bundles": [{"id": b.id, "status": b.status, "attempts": b.attempts}
+                                      | {"findings": [{"path": _terminal(f.path),
+                                                       "start_line": f.start_line,
+                                                       "end_line": f.end_line,
+                                                       "severity": _terminal(f.severity),
+                                                       "title": _terminal(f.title),
+                                                       "has_suggestion": f.suggestion is not None}
+                                                      for f in b.findings]}
                                       for b in state.bundle_states]}, indent=2))
         return 0
     if bool(args.from_ref) != bool(args.to_ref) or (args.commit and args.to_ref):

@@ -1,10 +1,13 @@
-Observed on 2026-10-24 before 16:30:15 UTC, Windows / Python 3.14.0.
-Command: python fixtures/prepare_demo.py
-Expected: prepare or verify a synthetic local Git fixture; actual: existing synthetic fixture verified without modification, exit 0. Fresh fixture recreation was also exercised by test_t02_recreate_demo_fixture.
-Command: python -m pytest -q > evidence/test-output.txt
-Expected: deterministic local mocked fixture tests pass; actual: 28 passed in 23.91s, exit 0.
-Command: python -m pytest -q tests/test_pipeline.py::test_t12_cli_export_and_resume_with_mock_http > evidence/mock-export-resume.txt
-Expected: mock CLI export and exact resume; actual: 1 passed in 2.36s, exit 0.
-Command: python -m reviewdesk preview --repo fixtures/demo --format json > evidence/preview.json
-Expected: local no-network preview; actual: JSON preview with one included path, exit 0.
-No paid or hosted calls. The fixture working-tree change is intentional.
+Observed 2026-10-24, by 18:00:56 UTC, Windows / fresh Python 3.14.0 venv.
+Command: .venv/Scripts/python.exe -m pytest -q
+Expected: retained real-code tests pass; actual: 33 passed in 15.94s, exit 0.
+Command: .venv/Scripts/python.exe -m pytest -q tests/test_privacy_real.py
+Expected: actual controlled-input scanner/gate checks pass; actual: 13 passed in 0.64s, exit 0.
+Command: .venv/Scripts/python.exe fixtures/prepare_demo.py
+Expected: controlled Git fixture ready; actual: ready, exit 0.
+Command: .venv/Scripts/reviewdesk.exe preview --repo fixtures/demo --format json > evidence/preview.json
+Expected: no-model preview; actual: one included file, exit 0.
+Command: env -u LLM_BASE_URL -u LLM_MODEL -u LLM_API_KEY .venv/Scripts/reviewdesk.exe review --repo fixtures/demo
+Expected: safe configuration refusal; actual: exit 2.
+Direct local scanner and gate verdicts (no HTTP) are in evidence/privacy-check.txt.
+No live model, paid or hosted call occurred. Provider/model/endpoint not configured.

@@ -1,0 +1,8 @@
+included_files: 1 credential_classes: 7 redaction_records: 14
+rule_counts: {'assignment': 2, 'database_url': 2, 'google_api': 2, 'jwt': 2, 'slack_token': 2, 'stripe_live': 4}
+new_file_line_metadata_exact: True newlines_and_json_escapes_preserved: True
+nonsecret_sha_digest_prose_and_token_url_preserved: True
+plain_and_serialized_request_secrets_absent: True approved_body_bytes: 3230
+residual_secret_payloads_rejected: 11 of 11
+nested_or_escaped_json_residual_cases_rejected: 4 of 4
+http_calls: 0

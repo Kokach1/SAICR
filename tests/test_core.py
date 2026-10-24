@@ -1,4 +1,5 @@
 from argparse import Namespace
+import os
 from pathlib import Path
 import json
 
@@ -9,7 +10,7 @@ from reviewdesk.contracts import (Change, Finding, Hunk, Limits, ReviewOptions, 
                                   Snapshot, parse_findings)
 from reviewdesk.packing import pack_documents
 from reviewdesk.privacy import gate_payload, sanitize_file
-from reviewdesk.revisions import capture_snapshot, find_root, load_target
+from reviewdesk.revisions import HOOKS_PATH, capture_snapshot, find_root, load_target
 from reviewdesk.selection import check_path, choose_files
 from reviewdesk.settings import load_settings, validate_endpoint
 from conftest import git
@@ -190,3 +191,7 @@ def test_t02_recreate_demo_fixture(tmp_path, monkeypatch):
     module.main()
     snap = capture_snapshot(module.ROOT, ReviewOptions(repo=module.ROOT, preview=True))
     assert [c.path for c in snap.changes] == ["example.py"]
+
+
+def test_git_hooks_path_is_native():
+    assert HOOKS_PATH == ("NUL" if os.name == "nt" else "/dev/null")

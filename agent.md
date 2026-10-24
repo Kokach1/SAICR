@@ -8,50 +8,68 @@ CLI-first tracked-workspace (staged and unstaged versus HEAD), merge-base range 
 
 ## 2. Environment and setup
 
-Tested on Windows with Python **3.14.0**, Git **2.52.0.windows.1**, Pydantic **2.14.1**, httpx **0.28.1**, pytest **9.1.1**, and setuptools **84.0.0**. Evidence: `evidence/environment.txt` and `evidence/setup.txt`. Safe setup: create a virtual environment, run `python -m pip install -e '.[test]'`, then `python -m pytest -q`. After dependencies were separately installed, both `python -m pip install -e . --no-deps --no-build-isolation` and `python -m pip install -e '.[test]' --no-build-isolation --no-deps` completed successfully in this environment; a fresh dependency-resolving editable install was **not** tested. No credentials are needed for preview/tests. Python 3.11–3.13, Linux/macOS, local model protocols beyond the mock, hosted endpoints and paid configurations were **not tested**. Third-party installations remain under their own license and notice files; no dependency was vendored.
+REAL EXECUTION: Windows, Python **3.14.0**, Git **2.52.0.windows.1**. A newly created `.venv` successfully installed the project using `.venv/Scripts/python.exe -m pip install -e .`, then installed pytest for development. Installed versions: Pydantic **2.14.1**, httpx **0.28.1**, pytest **9.1.1**. The only network use in Phase A was pip package installation. No credentials are needed for preview/tests. Python 3.11-3.13, Linux/macOS, live local/hosted model configurations and paid calls remain **not tested**. Third-party libraries retain their own license and notice files; no library is vendored.
 
 ## 3. Reproducible commands
 
-The following were executed locally (the fixture preparation command checks or creates a controlled local repository):
+REAL EXECUTION (Windows bash, from the repository root; no HTTP/model calls):
 
 ```sh
-python -m pytest -q
-python -m reviewdesk --help
-python fixtures/prepare_demo.py
-python -m reviewdesk preview --repo fixtures/demo --format json
-python -m pytest -q tests/test_pipeline.py::test_t12_cli_export_and_resume_with_mock_http
+python -m venv .venv
+.venv/Scripts/python.exe -m pip install -e .
+.venv/Scripts/python.exe -m pip install 'pytest>=8,<10'
+.venv/Scripts/python.exe -m pytest -q
+.venv/Scripts/python.exe -m pytest -q tests/test_privacy_real.py
+.venv/Scripts/python.exe fixtures/prepare_demo.py
+.venv/Scripts/reviewdesk.exe preview --repo fixtures/demo
+env -u LLM_BASE_URL -u LLM_MODEL -u LLM_API_KEY .venv/Scripts/reviewdesk.exe review --repo fixtures/demo
 ```
 
-The last command exercises CLI review `--output` and `--resume` in process with an in-memory fake transport, **not** a live provider. A mock test writes its JSON export to pytest's temporary directory, not the target repository. For an actual review command against a separately configured local server, use `python -m reviewdesk review --repo fixtures/demo --model MODEL --base-url http://localhost:PORT --allow-loopback-http --output review-result.json`; this command was **not run**. Remote uploads additionally need `--allow-hosted-upload` and separate permission. Neither a paid call nor a hosted upload is authorized by the default test procedure.
+The final command exits **2** with a safe configuration error. The controlled-input tests call the actual Git, scanner, message construction and privacy gate code, never a replacement model or HTTP client. Real-model `review`, `--output`, `sessions show` and `--resume` have **not** been run. They require the Phase B prerequisites in section 9.
 
 ## 4. Acceptance matrix
 
-Evidence is from `python -m pytest -q`, most recently recorded in `evidence/test-output.txt`; a targeted mock CLI export/resume run is in `evidence/mock-export-resume.txt`. `pass` refers only to the named deterministic test assertions, not broad certification of each threat model.
+REAL EXECUTION: `evidence/test-output.txt` records the retained real-code checks. "Pass" covers only the listed direct checks, not provider interaction. `tests/test_privacy_real.py` checks controlled fixture input through actual scanner/serialization/gate functions without constructing a client.
 
 | ID | Test file and representative test | Expected and observed | Status / gaps |
 | --- | --- | --- | --- |
-| T01 | `tests/test_core.py::test_t01_strict_settings`, `tests/test_pipeline.py::test_t01_preview_does_not_construct_http_client` | Invalid settings rejected, preview no client; observed pass | pass for tested inputs |
-| T02 | `tests/test_core.py::test_t02_workspace_and_historical`, `test_t02_range_and_rename`, `test_t02_merge_rejected_and_credential_not_read`, `test_t02_git_filter_is_rejected_without_execution`, `test_t02_recreate_demo_fixture` | Git modes, merge refusal, filter guard and demo reconstruction; observed pass | pass for fixtures; exotic Git configurations not exhaustively tested |
-| T03 | `tests/test_core.py::test_t03_workspace_race_detected`, `test_t02_workspace_and_historical` | historical blobs and simulated race; observed pass | pass for tested race |
-| T04 | `tests/test_core.py::test_t04_paths_and_choices`, `test_t04_git_symlink_and_submodule_are_skipped` | unsafe paths and special entries excluded; observed pass | pass for tested paths |
-| T05 | `tests/test_core.py::test_t05_t06_redaction_and_packing`, `tests/test_pipeline.py::test_t05_secret_not_in_request_or_report` | fake secret absent from captured request/state/report; observed pass | pass for synthetic rules, not proof of universal detection |
-| T06 | `tests/test_pipeline.py::test_t06_boundaries_and_prompt_injection`, `tests/test_core.py::test_t05_t06_redaction_and_packing` | stable bundles and explicit oversized error; observed pass | pass for tested boundaries |
-| T07 | `tests/test_pipeline.py::test_t07_t09_validation`, `test_t07_repair_and_uncertain`, `test_t06_boundaries_and_prompt_injection` | invalid responses bounded to two calls, code kept as data; observed pass | pass for tested schemas |
-| T08 | `tests/test_pipeline.py::test_t08_transport`, `test_t08_unsupported_mode_and_response_limit`, `test_t08_timeout_has_safe_error` | redirect, size and timeout errors; observed pass | pass for mocks; actual TLS handshake not tested |
-| T09 | `tests/test_pipeline.py::test_t07_t09_validation` | invalid ranges rejected; observed pass | pass for tested ranges |
-| T10 | `tests/test_pipeline.py::test_t10_t11_checkpoint_accounting`, `test_t10_corrupt_state_and_key_options`, `test_t10_uncertain_resume_requires_permission`, `test_t10_atomic_parallel_writes` | corrupt/mismatch rejected, parallel writes/resume checked; observed pass | pass for local threads; cross-process locks not tested |
-| T11 | `tests/test_pipeline.py::test_t10_t11_checkpoint_accounting`, `test_t11_budget_blocks_second_bundle`, `test_t07_repair_and_uncertain` | Decimal estimate, unknown usage, overshoot and cap; observed pass | pass for synthetic rates |
-| T12 | `tests/test_pipeline.py::test_t12_mocked_review_resume_and_export`, `test_t12_cli_export_and_resume_with_mock_http`, `test_t12_export_symlink_and_checkpoint_exit`, `test_t12_report_cannot_write_target_repo` | mocked export/resume, symlink, target-repo write refusal and exit checks; observed pass | pass for mock; no live quality claim |
+| T01 | `test_t01_strict_settings`, `test_t01_preview_cli_no_model` | Strict settings, preview 0, no-model review 2 | pass; preview no-client claim is inspection-only |
+| T02 | `test_t02_workspace_and_historical`, `test_t02_range_and_rename`, `test_t02_merge_rejected_and_credential_not_read`, `test_t02_git_filter_is_rejected_without_execution`, `test_t02_recreate_demo_fixture`, `test_git_hooks_path_is_native` | Git revision modes, filter guard and native hooks setting | pass on Windows; POSIX inspected only |
+| T03 | `test_t03_workspace_race_detected`, `test_t02_workspace_and_historical` | Concurrent controlled workspace edit rejected; historical target blobs read | pass for these inputs |
+| T04 | `test_t04_paths_and_choices`, `test_t04_git_symlink_and_submodule_are_skipped` | Path exclusions and special entries | pass for tested cases |
+| T05 | `test_t05_t06_redaction_and_packing`, `tests/test_privacy_real.py` | Seven fixture credential classes excluded from approved serialized body; eleven residual variants and nested/escaped cases rejected | pass locally; real provider-generated output unverified |
+| T06 | `test_t06_boundaries_and_prompt_injection`, `test_t05_t06_redaction_and_packing` | Bundle size and data-envelope checks | pass for tested limits |
+| T07 | `test_t01_strict_settings`, `test_t07_t09_validation` | Schema parsing and location validation | pass; live response repair unverified |
+| T08 | `test_transport_rejects_unapproved_payload` | Unapproved object rejected locally, before HTTP construction | pass locally; live HTTP unverified |
+| T09 | `test_t07_t09_validation` | Invalid locations rejected, exact dedup retained | pass |
+| T10 | `test_t10_t11_checkpoint_accounting`, `test_t10_corrupt_state_and_key_options`, `test_t10_atomic_parallel_writes` | Real checkpoint I/O and local concurrency | pass; live checkpoint/resume unverified |
+| T11 | `test_t10_t11_checkpoint_accounting` | Real accounting arithmetic and soft-cap decision | pass; provider usage/dispatch unverified |
+| T12 | `test_export_symlink_refused`, `test_export_existing_destination_refused`, `test_t12_report_cannot_write_target_repo`, `test_parser_and_terminal_escape` | Real preview export guards and terminal escape | pass; live review/export/show/resume unverified |
 
-Run `python -m pytest -q tests/test_core.py tests/test_pipeline.py` to reproduce the matrix. The full suite includes 28 tests at the time of this document; if the evidence count differs after edits, re-run before asserting results.
+Run `.venv/Scripts/python.exe -m pytest -q` to reproduce the actual retained tests (35 passed at the recorded run). The controlled fixture is input data, not a provider response.
 
 ## 5. Implementation status
 
-Implemented: the 13 Python modules, strict response envelope, bounded Git capture, deterministic selection, pattern redaction and outbound gate, bundles, sequential chat transport, location validation, atomic checkpoints/export, usage/budget/cost calculation, CLI and mock fixtures. Partial limitations: scanner patterns are heuristic; filtering repository attributes is conservative; workspace bytes are captured in memory; cross-process locking and provider-specific compatibility have not been exercised on live endpoints. Not implemented: deferred features listed above. Not tested: live AI quality, actual paid or hosted API traffic, Linux/macOS and older supported Python versions. Source inspection and deterministic mock verification are not live observations. The initial **project** commit is `b5b92d9ecd700f3ab657853d7daf4e36c596a7f0`; the **fixture** baseline hash is `161ccfd4dab56c77a399762c61dc8992b556f387`.
+Implemented: the 13 existing modules remain in place. Scanner rules now include JWT-shaped strings, Slack tokens, Stripe live keys, Google API keys, database credential URLs and context-labeled AWS secrets; the ruleset is `scanner-2`. Git hooksPath is OS-aware. `sessions show` includes saved finding path, start/end, severity, title and suggestion presence. The product is **not ready-to-use end-to-end** until a real endpoint run confirms review, export, checkpoint, sessions and resume. Partial limitations: heuristic scanning and incomplete platform/provider coverage. Not implemented: deferred features in section 1. Starting project HEAD: `de842a8a1fac68c7c3150db8dfa074f063a7f242`; the current changes are uncommitted and not represented by that SHA.
+
+Fix 0 removal in `tests/test_pipeline.py`: deleted simulated-provider tests `test_t08_transport`, `test_t12_mocked_review_resume_and_export`, `test_t07_repair_and_uncertain`, `test_t05_secret_not_in_request_or_report`, `test_t11_budget_blocks_second_bundle`, `test_t08_unsupported_mode_and_response_limit`, `test_t10_uncertain_resume_requires_permission`, `test_t12_cli_export_and_resume_with_mock_http`, `test_t08_timeout_has_safe_error`, and `test_t01_preview_does_not_construct_http_client`. The real unapproved-payload check from `test_t08_transport` remains as `test_transport_rejects_unapproved_payload`. Removed only the simulated checkpoint-write failure part of `test_t12_export_symlink_and_checkpoint_exit`; its real symlink assertion remains as `test_export_symlink_refused`. Parser, terminal and existing-report refusal checks from the combined review test remain separately. Deleted `evidence/mock-export-resume.txt`. No reusable real-Git fixture helper or production function was removed.
+
+Preserved `tests/test_core.py` real Git/path/privacy cases, the direct real-code tests in `tests/test_pipeline.py` (schema/location, checkpoint I/O, accounting, preview, export safety, packing and terminal escaping), and the real pipeline checks added in `tests/test_privacy_real.py`. The surviving `monkeypatch` usage in `test_core.py` only controls local Git fixture paths or mutates a real file mid-capture; it never supplies a provider response. Controlled schema examples validate a parser directly, not a model boundary.
+
+Lost coverage: provider transport status/timeout/redirect behavior; response repair/attempt count; request and export/checkpoint privacy after real generation; provider-reported usage, in-flight soft-budget behavior and uncertain live resume; live CLI export and session findings. These are **unverified by execution**, not made green by removing tests. Existing direct checkpoint arithmetic/I/O tests do not verify a checkpoint produced by a real review.
 
 ## 6. Security checks
 
-Synthetic fake-secret redaction and in-memory outbound capture, path traversal/control/encoding checks, symlink/submodule skip, prompt-injection-as-data check, no-client preview, JSON output sanitization, redirect refusal, repair limit, budget and uncertain-call resume are covered by named tests above. Filter commands are rejected before diff collection. The local tests had no unresolved failing assertions at evidence capture. Limitations: finite scanner patterns do not cover all secret formats, Git/environment permutations and real TLS/provider responses are not fully exercised. No raw request body logging is enabled.
+REAL EXECUTION: `tests/test_privacy_real.py` feeds controlled local Git fixture changes into real snapshot, selection, `sanitize_file`, packing, `compose_message`, JSON serialization and `gate_payload`. Seven credential classes yield 14 redaction records across context and patch; redaction path/new-file line and newline count match fixture input. Eleven deliberately residual variants, including contextual AWS and Slack user tokens, and nested/escaped JSON cases are blocked by the real outbound gate. SHA, digest, ordinary prose and `token_url` remain. No HTTP client is built by this check. Direct Git path traversal, symlink/submodule and repository-filter tests pass. Preview returns 0 without model configuration; no-model review returns 2. This tests concrete plaintext/JSON formats only, not arbitrary encodings or all secrets.
+
+CODE INSPECTION ONLY - never had real test coverage; unverified by execution (do not induce these against a provider):
+
+- HTTP 429: `transport.py:28-31` bounds integer `Retry-After` to 30 seconds; `runner.py:90-125` records an unknown-usage attempt and sleeps/retries only if under the two-attempt cap. A configured soft budget can stop that retry on unknown usage.
+- HTTP 401/403: `transport.py:32-33` raises `authentication`; `runner.py:111-125,147-155` marks the bundle failed with that error code, no per-bundle retry and partial result (CLI exit 1). It does not halt other bundles solely for authentication failure; repeated failures across different bundles are possible.
+- HTTP 5xx and ambiguous timeouts: `transport.py:36-37,66-67` marks them uncertain; `runner.py:115-126` stops unless `--retry-uncertain` authorizes one remaining attempt, with a two-attempt maximum. A previous simulated timeout check was deleted; there is no real execution coverage.
+- HTTP 3xx: `transport.py:24-35` disables redirects and returns `redirect_denied`; `runner.py:111-126` does not retry that attempt. A previous simulated redirect check was deleted; there is no real execution coverage.
+
+The lifecycle matches the documented per-bundle status and exit contract by inspection. No live provider response, TLS negotiation or provider-generated persistence was observed.
 
 ## 7. Accessibility and usability
 
@@ -59,8 +77,12 @@ Plain text output, `--help`, meaningful exit codes, severity in text rather than
 
 ## 8. Evidence and limitations
 
-`evidence/test-output.txt` is sanitized local fixture test output; `evidence/preview.json` is a synthetic **no-network preview**, not an AI report; `evidence/mock-export-resume.txt` is a **mock HTTP** test log; `evidence/environment.txt` records installed versions and UTC time; `evidence/final-run.txt` records final expected versus observed commands and UTC time. Run timestamps use UTC; recreate the ignored nested Git fixture with `python fixtures/prepare_demo.py` in a fresh checkout before preview. No raw private code or actual credentials are included in evidence. No live model evaluation or quality measurement has been performed; partial/mock observations must not be advertised as live results. Python/Git host differences and scanner blind spots remain unresolved verification gaps.
+REAL EXECUTION evidence (UTC, no credentials or raw source/payloads): `evidence/setup.txt` records fresh-venv editable installation; `evidence/environment.txt` records installed versions; `evidence/test-output.txt` records the retained suite; `evidence/privacy-check.txt` records secret-class counts, preservation/rejection verdicts and body size; `evidence/preview.json` is a real no-network preview of the controlled local Git fixture; `evidence/final-run.txt` records exact local commands and exit codes. Neither preview nor unit-level privacy inspection is a model-generated report. A newly recreated fixture gets a different Git commit OID but the same controlled source data. Limitations: only the current Windows platform and concrete serialization forms were observed; no live-model quality, generated output privacy, billing or resume behavior has been observed.
 
-## 9. Optional live evaluation
+CODE INSPECTION evidence is explicitly confined to section 6 (source path and line references), and is not described as execution coverage. BLOCKED evidence is described in section 9. Do not use legacy test counts or the deleted provider-response evidence file as proof of current behavior.
 
-Requires separate explicit permission for any hosted upload or paid API call, plus a user-configured compatible endpoint and model. Use only synthetic seeded defects and clean changes. Record true findings, false positives, misses, latency and known usage. Catching four of five synthetic defects is a stretch demo target, not a guaranteed outcome or passing criterion. No model availability or cost is guaranteed.
+## 9. Real-model validation and Phase B gate
+
+BLOCKED: **Real-model operation unverified - blocked on missing prerequisites: chosen provider, model name and endpoint/base URL.** No endpoint or model was configured in the local environment at verification time. A key is needed only if the selected endpoint requires authentication; explicit spend approval (concrete amount and call limits) only if wallet-bearing; explicit code-upload consent only for a hosted endpoint. Those conditional items cannot be determined until an endpoint is chosen. No model call, live report export, provider-generated checkpoint, `sessions show` of real findings or exact live resume took place. The session-findings change is implemented but **unverified by execution**.
+
+Once the owner provides the applicable prerequisites, run exactly one bounded real review of the controlled demo fixture; check actual terminal findings, exported JSON, checkpoint, `sessions list/show`, and exact resume without additional calls. Programmatically verify that none of the controlled fixture's credential-shaped inputs occur in any exported report, persisted state or stdout; report verdicts/counts only. Record actual findings against the two seeded issues, false positives, misses, usage if known, latency, and any cost only as a dated-rate estimate. Any retry requires newly approved limits. Never use deliberately induced provider failures or pretend a clean report proves safety.

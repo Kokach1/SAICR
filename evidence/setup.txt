@@ -1,5 +1,5 @@
-2026-10-24 UTC, Windows / Python 3.14.0; sanitized setup observations
-python -m pip install -e . --no-deps --no-build-isolation: success (editable package)
-python -m pip install -e '.[test]' --no-build-isolation --no-deps: success (editable package)
-Dependency installation before these steps: pydantic 2.14.1 and pytest 9.1.1 installed with pip with user permission; httpx 0.28.1 already installed.
-No live model traffic or credential access.
+2026-10-24 UTC, Windows / Python 3.14.0; fresh environment setup.
+python -m venv .venv: exit 0.
+.venv/Scripts/python.exe -m pip install -q -e .: exit 0 (editable runtime installation with dependencies).
+.venv/Scripts/python.exe -m pip install -q 'pytest>=8,<10': exit 0 (test dependency only).
+Pip installation was the only network use in Phase A. No provider calls or credentials.

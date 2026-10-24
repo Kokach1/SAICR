@@ -18,6 +18,7 @@ GIT_ENV = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "NUL" if os.name == 
            "GIT_PAGER": "cat", "GIT_EXTERNAL_DIFF": "0",
            "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"}
 GIT_BINARY = shutil.which("git")
+HOOKS_PATH = "NUL" if os.name == "nt" else "/dev/null"
 
 
 def _git(root: Path, *args: str, max_bytes: int = MAX_CAPTURE) -> bytes:
@@ -27,7 +28,7 @@ def _git(root: Path, *args: str, max_bytes: int = MAX_CAPTURE) -> bytes:
     env.update(GIT_ENV)
     try:
         with tempfile.TemporaryFile() as output:
-            proc = subprocess.run([GIT_BINARY, "-c", "core.hooksPath=NUL", "-c", "diff.external=",
+            proc = subprocess.run([GIT_BINARY, "-c", f"core.hooksPath={HOOKS_PATH}", "-c", "diff.external=",
                                    "-c", "diff.trustExitCode=false", "-c", "core.quotePath=false",
                                    "-C", str(root), *args], env=env, shell=False,
                                   stdout=output, stderr=subprocess.DEVNULL, timeout=15)

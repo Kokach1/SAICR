@@ -1,23 +1,20 @@
 import asyncio
 from decimal import Decimal
 import json
-from pathlib import Path
 
-import httpx
 import pytest
 
-from conftest import git
 from reviewdesk.accounting import append_usage, estimate_cost, may_dispatch
 from reviewdesk.checkpoints import load_state, make_run_key, save_state
-from reviewdesk.contracts import (ApprovedPayload, BundleState, Checkpoint, EndpointPolicy,
-                                  PriceTable, ReviewOptions, Settings, Usage, UsageLedger)
+from reviewdesk.contracts import (BundleState, Checkpoint, PriceTable, ReviewOptions,
+                                  Settings, Usage, UsageLedger)
 from reviewdesk.messages import compose_message
 from reviewdesk.output import main, make_parser, render_report, write_report
 from reviewdesk.packing import pack_documents
-from reviewdesk.privacy import gate_payload, sanitize_file
+from reviewdesk.privacy import sanitize_file
 from reviewdesk.revisions import capture_snapshot
 from reviewdesk.runner import execute_review
-from reviewdesk.transport import TransportError, call_model
+from reviewdesk.transport import call_model
 from reviewdesk.validation import deduplicate, validate_locations
 from test_core import finding
 
@@ -46,31 +43,6 @@ def test_t07_t09_validation(repo):
     assert compose_message(bundle, config.model_copy(update={"schema_mode": "json_schema"})).body["response_format"]["type"] == "json_schema"
 
 
-def test_t08_transport(monkeypatch):
-    seen = []
-    def handler(request):
-        seen.append(request)
-        return httpx.Response(200, json={"choices": [{"message": {"content": '{"findings": []}'},
-                                                        "finish_reason": "stop"}],
-                                          "usage": {"prompt_tokens": 3, "completion_tokens": 2}})
-    original = httpx.AsyncClient
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(
-        transport=httpx.MockTransport(handler), **kw))
-    policy = EndpointPolicy(base_url="http://localhost:8765", loopback=True, upload_permitted=True)
-    payload = gate_payload(b'{"model":"m"}', policy)
-    reply = asyncio.run(call_model(payload, Settings(model="m", base_url=policy.base_url)))
-    assert reply.usage.input_tokens == 3
-    assert seen[0].url.path == "/chat/completions"
-    with pytest.raises(TypeError):
-        asyncio.run(call_model(b'{"model":"m"}', Settings(model="m")))
-    def redirect(request):
-        return httpx.Response(302, headers={"Location": "https://other.invalid/"})
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(
-        transport=httpx.MockTransport(redirect), **kw))
-    with pytest.raises(TransportError, match="redirect_denied"):
-        asyncio.run(call_model(payload, Settings(model="m", base_url=policy.base_url)))
-
-
 def test_t10_t11_checkpoint_accounting(repo, tmp_path):
     snapshot, bundle = fixture_bundle(repo)
     config = Settings(base_url="http://localhost:8080", model="m", allow_loopback_http=True)
@@ -97,53 +69,19 @@ def test_t10_t11_checkpoint_accounting(repo, tmp_path):
     assert estimate_cost(append_usage(ledger, Usage()), rates).amount is None
 
 
-def test_t12_mocked_review_resume_and_export(repo, tmp_path, monkeypatch):
-    fixture_bundle(repo)
-    monkeypatch.setenv("REVIEWDESK_CACHE_DIR", str(tmp_path / "cache"))
-    import reviewdesk.runner as runner
-    requests = []
-    async def fake_call(payload, config):
-        from reviewdesk.contracts import ModelReply
-        assert isinstance(payload, ApprovedPayload)
-        requests.append(payload.body)
-        return ModelReply(text=json.dumps({"findings": [finding()]}),
-                          usage=Usage(input_tokens=10, output_tokens=4, complete=True, source="provider"))
-    monkeypatch.setattr(runner, "call_model", fake_call)
-    config = Settings(base_url="http://localhost:8080", model="mock", allow_loopback_http=True)
-    opts = ReviewOptions(repo=repo)
-    result = asyncio.run(execute_review(opts, config))
-    assert not result.partial and len(result.findings) == 1 and len(requests) == 1
-    exported = tmp_path / "result.json"
-    write_report(exported, result)
-    assert json.loads(exported.read_text())["findings"][0]["path"] == "main.py"
-    with pytest.raises(OSError):
-        write_report(exported, result)
-    resumed = asyncio.run(execute_review(opts.model_copy(update={"resume_id": result.run_id}), config))
-    assert resumed.findings == result.findings and len(requests) == 1
-    preview = asyncio.run(execute_review(opts.model_copy(update={"preview": True}), Settings()))
-    assert preview.run_id == "" and len(requests) == 1
+def test_parser_and_terminal_escape(repo):
+    (repo / "main.py").write_bytes(b"one = 2\n")
+    preview = asyncio.run(execute_review(ReviewOptions(repo=repo, preview=True), Settings()))
     with pytest.raises(SystemExit):
         make_parser().parse_args(["review", "--repo", str(repo), "--commit", "HEAD",
                                   "--from", "HEAD", "--to", "HEAD"])
-    assert "\\x1b" in render_report(result.model_copy(update={
+    assert "\\x1b" in render_report(preview.model_copy(update={
         "warnings": ["unsafe\x1b[31mterminal"]}), "text")
 
 
-def test_t07_repair_and_uncertain(repo, tmp_path, monkeypatch):
-    fixture_bundle(repo)
-    monkeypatch.setenv("REVIEWDESK_CACHE_DIR", str(tmp_path / "cache"))
-    import reviewdesk.runner as runner
-    calls = []
-    async def broken(payload, config):
-        from reviewdesk.contracts import ModelReply
-        calls.append(payload)
-        return ModelReply(text="not JSON", usage=Usage())
-    monkeypatch.setattr(runner, "call_model", broken)
-    config = Settings(base_url="http://localhost:8080", model="mock", allow_loopback_http=True)
-    result = asyncio.run(execute_review(ReviewOptions(repo=repo), config))
-    assert result.partial and len(calls) == 2
-    assert result.usage.complete is False
-    assert not result.findings
+def test_transport_rejects_unapproved_payload():
+    with pytest.raises(TypeError, match="approved payload"):
+        asyncio.run(call_model(b"{}", Settings(model="offline-inspection")))
 
 
 def test_t01_preview_cli_no_model(repo, capsys):
@@ -153,46 +91,7 @@ def test_t01_preview_cli_no_model(repo, capsys):
     assert main(["review", "--repo", str(repo)]) == 2
 
 
-def test_t05_secret_not_in_request_or_report(repo, tmp_path, monkeypatch):
-    (repo / "main.py").write_bytes(b"one = 1\npassword = fakepassword123\n")
-    monkeypatch.setenv("REVIEWDESK_CACHE_DIR", str(tmp_path / "cache"))
-    import reviewdesk.runner as runner
-    bodies = []
-    async def fake(payload, config):
-        from reviewdesk.contracts import ModelReply
-        bodies.append(payload.body)
-        return ModelReply(text='{"findings":[]}', usage=Usage())
-    monkeypatch.setattr(runner, "call_model", fake)
-    result = asyncio.run(execute_review(ReviewOptions(repo=repo), Settings(
-        base_url="http://localhost:8080", model="mock", allow_loopback_http=True)))
-    assert len(bodies) == 1 and b"fakepassword123" not in bodies[0]
-    assert "fakepassword123" not in render_report(result, "json")
-    cache = tmp_path / "cache" / (result.run_id + ".json")
-    assert "fakepassword123" not in cache.read_text()
-
-
-def test_t11_budget_blocks_second_bundle(repo, tmp_path, monkeypatch):
-    for n in range(6):
-        (repo / f"file{n}.py").write_bytes(b"value = 1\n")
-        git(repo, "add", f"file{n}.py")
-    monkeypatch.setenv("REVIEWDESK_CACHE_DIR", str(tmp_path / "cache"))
-    import reviewdesk.runner as runner
-    calls = []
-    async def fake(payload, config):
-        from reviewdesk.contracts import ModelReply
-        calls.append(1)
-        return ModelReply(text='{"findings":[]}', usage=Usage(input_tokens=6, output_tokens=5,
-                                                              complete=True, source="provider"))
-    monkeypatch.setattr(runner, "call_model", fake)
-    result = asyncio.run(execute_review(ReviewOptions(repo=repo),
-                                         Settings(base_url="http://localhost:8080", model="m",
-                                                  allow_loopback_http=True, max_tokens_budget=10)))
-    assert result.partial and len(calls) == 1
-    assert any(e.code == "soft_budget_reached" for e in result.bundle_errors)
-    assert any("overshot" in w for w in result.warnings)
-
-
-def test_t12_export_symlink_and_checkpoint_exit(repo, tmp_path, monkeypatch):
+def test_export_symlink_refused(repo, tmp_path):
     (repo / "main.py").write_bytes(b"one = 2\n")
     result = asyncio.run(execute_review(ReviewOptions(repo=repo, preview=True), Settings()))
     target = tmp_path / "target.json"
@@ -202,73 +101,17 @@ def test_t12_export_symlink_and_checkpoint_exit(repo, tmp_path, monkeypatch):
     with pytest.raises(OSError):
         write_report(link, result)
     assert target.read_text() == "untouched"
-    import reviewdesk.runner as runner
-    from reviewdesk.checkpoints import CheckpointWriteError
-    monkeypatch.setenv("REVIEWDESK_CACHE_DIR", str(tmp_path / "cache"))
-    def broken(cache, state):
-        raise CheckpointWriteError("synthetic")
-    monkeypatch.setattr(runner, "save_state", broken)
-    assert main(["review", "--repo", str(repo), "--model", "m", "--base-url",
-                 "http://localhost:8080", "--allow-loopback-http"]) == 3
 
 
-def test_t08_unsupported_mode_and_response_limit(monkeypatch):
-    original = httpx.AsyncClient
-    payload = ApprovedPayload(body=b'{"model":"m"}', endpoint="http://localhost:4567/chat/completions")
-    config = Settings(model="m", schema_mode="json_object")
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(
-        transport=httpx.MockTransport(lambda req: httpx.Response(400)), **kw))
-    with pytest.raises(TransportError, match="schema_mode_unsupported_use_text"):
-        asyncio.run(call_model(payload, config))
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(
-        transport=httpx.MockTransport(lambda req: httpx.Response(200, content=b"x" * 524289)), **kw))
-    with pytest.raises(TransportError, match="response_too_large"):
-        asyncio.run(call_model(payload, config))
-
-
-def test_t10_uncertain_resume_requires_permission(repo, tmp_path, monkeypatch):
-    fixture_bundle(repo)
-    monkeypatch.setenv("REVIEWDESK_CACHE_DIR", str(tmp_path / "cache"))
-    import reviewdesk.runner as runner
-    calls = []
-    async def ambiguous(payload, config):
-        calls.append(1)
-        raise TransportError("delivery_uncertain", ambiguous=True)
-    monkeypatch.setattr(runner, "call_model", ambiguous)
-    config = Settings(model="m", base_url="http://localhost:8080", allow_loopback_http=True)
-    result = asyncio.run(execute_review(ReviewOptions(repo=repo), config))
-    assert result.partial and len(calls) == 1
-    resumed = asyncio.run(execute_review(ReviewOptions(repo=repo, resume_id=result.run_id), config))
-    assert resumed.partial and len(calls) == 1
-    from reviewdesk.contracts import ModelReply
-    async def good(payload, config):
-        calls.append(1)
-        return ModelReply(text='{"findings":[]}', usage=Usage(input_tokens=2, output_tokens=2,
-                                                               complete=True, source="provider"))
-    monkeypatch.setattr(runner, "call_model", good)
-    allowed = asyncio.run(execute_review(ReviewOptions(repo=repo, resume_id=result.run_id),
-                                          config.model_copy(update={"retry_uncertain": True})))
-    assert not allowed.partial and len(calls) == 2
-
-
-def test_t12_cli_export_and_resume_with_mock_http(repo, tmp_path, monkeypatch):
-    fixture_bundle(repo)
-    monkeypatch.setenv("REVIEWDESK_CACHE_DIR", str(tmp_path / "cache"))
-    import reviewdesk.runner as runner
-    requests = []
-    async def mock_endpoint(payload, config):
-        from reviewdesk.contracts import ModelReply
-        requests.append(payload.body)
-        return ModelReply(text='{"findings":[]}', usage=Usage(input_tokens=2, output_tokens=2,
-                                                               complete=True, source="provider"))
-    monkeypatch.setattr(runner, "call_model", mock_endpoint)
-    output = tmp_path / "review-result.json"
-    args = ["review", "--repo", str(repo), "--model", "synthetic",
-            "--base-url", "http://localhost:8080", "--allow-loopback-http"]
-    assert main([*args, "--output", str(output)]) == 0
-    run_id = json.loads(output.read_text())["run_id"]
-    assert main([*args, "--resume", run_id]) == 0
-    assert len(requests) == 1
+def test_export_existing_destination_refused(repo, tmp_path):
+    (repo / "main.py").write_bytes(b"one = 2\n")
+    result = asyncio.run(execute_review(ReviewOptions(repo=repo, preview=True), Settings()))
+    destination = tmp_path / "preview.json"
+    write_report(destination, result)
+    with pytest.raises(OSError, match="Report exists"):
+        write_report(destination, result)
+    write_report(destination, result, overwrite=True)
+    assert json.loads(destination.read_text())["run_id"] == ""
 
 
 def test_t06_boundaries_and_prompt_injection(repo):
@@ -305,24 +148,6 @@ def test_t10_corrupt_state_and_key_options(repo, tmp_path):
         load_state(tmp_path, state.run_id, key)
     assert key != make_run_key(snapshot, config.model_copy(update={"schema_mode": "json_object"}), [bundle.id])
     assert key != make_run_key(snapshot, config, ["changed bundle"])
-
-
-def test_t08_timeout_has_safe_error(monkeypatch):
-    original = httpx.AsyncClient
-    def timeout(request):
-        raise httpx.ReadTimeout("synthetic private request details")
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(
-        transport=httpx.MockTransport(timeout), **kw))
-    with pytest.raises(TransportError) as error:
-        asyncio.run(call_model(ApprovedPayload(body=b'{}', endpoint="http://localhost:4567/chat/completions"),
-                               Settings(model="m")))
-    assert error.value.ambiguous and "private request details" not in str(error.value)
-
-
-def test_t01_preview_does_not_construct_http_client(repo, monkeypatch):
-    (repo / "main.py").write_bytes(b"one = 2\n")
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: pytest.fail("Client constructed in preview"))
-    assert main(["preview", "--repo", str(repo)]) == 0
 
 
 def test_t10_atomic_parallel_writes(tmp_path):

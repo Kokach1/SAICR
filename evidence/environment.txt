@@ -1,5 +1,7 @@
-UTC: 2026-10-24T16:18:22.599230+00:00
-Python: 3.14.0
+UTC: 2026-10-24T17:57:04.765181+00:00
+Fresh venv Python: 3.14.0
+Git: 2.52.0.windows.1
 httpx: 0.28.1
 pydantic: 2.14.1
 pytest: 9.1.1
+Configured model and endpoint: no
