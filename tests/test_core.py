@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from reviewdesk.contracts import (Change, Finding, Hunk, Limits, ReviewOptions, Settings,
                                   Snapshot, parse_findings)
 from reviewdesk.packing import pack_documents
+from reviewdesk.checkpoints import make_run_key
 from reviewdesk.privacy import gate_payload, sanitize_file
 from reviewdesk.revisions import HOOKS_PATH, capture_snapshot, find_root, load_target
 from reviewdesk.selection import check_path, choose_files
@@ -35,8 +36,16 @@ def test_t01_strict_settings():
         load_settings(Namespace(command="review"), {})
     config = Settings(model="m", base_url="https://example.invalid", allow_hosted_upload=True)
     assert validate_endpoint(config).upload_permitted
+    policy = validate_endpoint(config.model_copy(update={
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/"}))
+    assert policy.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"
+    assert gate_payload(b"{}", policy).endpoint == (
+        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
     for url in ("http://example.invalid", "https://user:pass@example.invalid",
-                "https://example.invalid/?key=123", "https://example.invalid/#x"):
+                "https://example.invalid/?key=123", "https://example.invalid/#x",
+                "https://example.invalid/a/../b", "https://example.invalid/a//b",
+                "https://example.invalid/a\\b", "https://example.invalid/a b", "https://example.invalid/a\tb",
+                "https://example.invalid/a%2fb"):
         with pytest.raises(ValueError):
             validate_endpoint(config.model_copy(update={"base_url": url}))
     with pytest.raises(ValueError):
@@ -44,6 +53,27 @@ def test_t01_strict_settings():
     key = load_settings(Namespace(command="review", base_url="https://example.invalid",
                                   model="m"), {"LLM_API_KEY": "synthetic-test-only"})
     assert "synthetic-test-only" not in repr(key) + key.model_dump_json()
+
+
+def test_endpoint_paths_are_canonical_and_resume_uses_normalized_base():
+    config = Settings(model="m", base_url="https://example.invalid/v1/openai",
+                      allow_hosted_upload=True)
+    assert validate_endpoint(config).base_url == "https://example.invalid/v1/openai"
+    assert validate_endpoint(config.model_copy(update={"base_url": config.base_url + "/"})).base_url == config.base_url
+    for suffix in ("/./openai", "/v1/../openai", "/v1//openai", "/v1/%2e/openai",
+                   "/v1/open ai", "/v1/openai\\x"):
+        with pytest.raises(ValueError):
+            validate_endpoint(config.model_copy(update={"base_url": "https://example.invalid" + suffix}))
+    with pytest.raises(ValueError):
+        validate_endpoint(Settings(model="m", base_url="http://example.invalid/v1",
+                                   allow_hosted_upload=True))
+    with pytest.raises(ValueError):
+        validate_endpoint(Settings(model="m", base_url="https://example.invalid/v1"))
+    snapshot = Snapshot(mode="workspace", base_oid="a", target_oid=None, identity="same", changes=[])
+    canonical = config.model_copy(update={"base_url": validate_endpoint(config).base_url})
+    with_slash = config.model_copy(update={"base_url": validate_endpoint(
+        config.model_copy(update={"base_url": config.base_url + "/"})).base_url})
+    assert make_run_key(snapshot, canonical, []) == make_run_key(snapshot, with_slash, [])
 
 
 def test_t02_workspace_and_historical(repo):

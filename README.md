@@ -33,7 +33,23 @@ python -m pytest -q tests/test_privacy_real.py
 
 For an actual explicitly permitted local inference server, set `LLM_BASE_URL`, `LLM_MODEL` and, only if the server requires it, `LLM_API_KEY`; then use `reviewdesk review --repo fixtures/demo --allow-loopback-http --output review-result.json`. This example has **not** been executed against a running server. Do not treat a local server as automatically free or safe. For HTTPS endpoints outside loopback, add `--allow-hosted-upload` for that invocation; this is permission for transmitting selected code. Paid calls also require separately approved amount and call limits. No provider/model, prices, free credits or availability are assumed. Real-model operation remains unverified.
 
-Endpoint URL must be a bare HTTPS origin (for example an origin with no path) or an explicitly allowed loopback HTTP origin. HTTP redirects are not followed. Providers differ: start with default `--schema-mode text`; `json_object` and `json_schema` are opt-in, and unsupported options fail rather than silently downgrade. Choose `--max-output-parameter max_tokens` or `max_completion_tokens` to match your server. `--max-output-tokens` defaults to 1500.
+Endpoint URL may be an HTTPS origin or an OpenAI-style HTTPS base path. Its path must be canonical slash-separated segments containing only `A-Z`, `a-z`, `0-9`, `-`, `.`, `_` and `~`; dot segments, empty segments, escapes, query strings, fragments and credentials are rejected. One trailing slash is normalized away. HTTP is allowed only for an explicitly permitted loopback server. HTTP redirects are not followed. Providers differ: start with default `--schema-mode text`; `json_object` and `json_schema` are opt-in, and unsupported options fail rather than silently downgrade. Choose `--max-output-parameter max_tokens` or `max_completion_tokens` to match your server. `--max-output-tokens` defaults to 1500.
+
+### Gemini setup (Windows)
+
+Gemini exposes an OpenAI-compatible chat-completions base at `https://generativelanguage.googleapis.com/v1beta/openai/`; Review Desk safely joins that base to `chat/completions`. In your own [Google AI Studio project](https://aistudio.google.com/), create a free API key and choose a model ID that your project currently lists as free-tier eligible, cross-checking the [official OpenAI-compatibility documentation](https://ai.google.dev/gemini-api/docs/openai). Model availability and free-tier eligibility change, so no model ID is hardcoded here. Google may use free-tier submitted content to improve its products: send only non-private code. The demo fixture is suitable for this purpose.
+
+In the PowerShell session used for the review (do not use `setx`, paste keys into chat, or save them in files):
+
+```powershell
+$env:LLM_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+$env:LLM_MODEL = "<current model ID from your AI Studio project>"
+$sec = Read-Host "Paste your Gemini API key" -AsSecureString
+$env:LLM_API_KEY = [System.Net.NetworkCredential]::new('', $sec).Password
+.\.venv\Scripts\python.exe -m reviewdesk review --repo fixtures\demo --allow-hosted-upload
+```
+
+Google's OpenAI-compatibility documentation does not specify a different chat-completions output-token field, so use the CLI default `max_tokens`; do not add `--max-output-parameter` unless Google documents a change for the model you selected. Keep `--schema-mode text` for Gemini because no Gemini JSON-mode response was verified here. To export outside the repository, use `--output "$env:USERPROFILE\Downloads\review-result.json"`. To test refusal without another model request, resume the same completed run with `--resume <RUN_ID>` and that same output path; it must refuse unless `--overwrite` is supplied. Inspect it with `sessions list` and `sessions show <RUN_ID>`. When finished, run `Remove-Item Env:LLM_API_KEY, Env:LLM_BASE_URL, Env:LLM_MODEL`.
 
 `--output PATH` writes JSON atomically outside the reviewed repository, refusing an existing destination unless `--overwrite` is specified. `--format json` prints a versioned JSON report. `reviewdesk sessions list` and `reviewdesk sessions show RUN_ID` inspect private checkpoints. `--resume RUN_ID` requires an exact snapshot, model, endpoint and request configuration match. A previously running or ambiguously delivered request requires `--retry-uncertain`; a second request may incur duplicate charges. A bundle makes at most two HTTP attempts, including repair/retry.
 

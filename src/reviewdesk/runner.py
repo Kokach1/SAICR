@@ -33,7 +33,9 @@ async def execute_review(options: ReviewOptions, config: Settings) -> RunResult:
                          cost=CostEstimate(reason="preview"), partial=False,
                          warnings=["No model request was made."] + warnings)
     policy = validate_endpoint(config)
-    config = config.model_copy(update={"exclude": list(options.exclude)})
+    # Use the validated canonical endpoint everywhere durable configuration is used.
+    # This makes a harmless trailing slash resume-compatible while retaining path identity.
+    config = config.model_copy(update={"base_url": policy.base_url, "exclude": list(options.exclude)})
     docs = []
     redactions = []
     for decision, change in zip(decisions, snapshot.changes):

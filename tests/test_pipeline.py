@@ -91,6 +91,26 @@ def test_t01_preview_cli_no_model(repo, capsys):
     assert main(["review", "--repo", str(repo)]) == 2
 
 
+def test_path_endpoint_resume_uses_normalized_base(repo, tmp_path, monkeypatch):
+    """A trailing base-path slash is the same durable endpoint; a path change is not."""
+    monkeypatch.setenv("REVIEWDESK_CACHE_DIR", str(tmp_path / "cache"))
+    options = ReviewOptions(repo=repo)
+    slash = Settings(base_url="https://example.invalid/v1/openai/", model="m",
+                     allow_hosted_upload=True)
+    initial = asyncio.run(execute_review(options, slash))
+    assert initial.run_id
+    canonical = slash.model_copy(update={"base_url": "https://example.invalid/v1/openai"})
+    # Resume uses the same real checkpoint and makes no HTTP request because this
+    # controlled fixture has no selected changes.
+    resumed = asyncio.run(execute_review(
+        ReviewOptions(repo=repo, resume_id=initial.run_id), canonical))
+    assert resumed.run_id == initial.run_id
+    with pytest.raises(ValueError, match="Checkpoint does not match"):
+        asyncio.run(execute_review(
+            ReviewOptions(repo=repo, resume_id=initial.run_id),
+            canonical.model_copy(update={"base_url": "https://example.invalid/v1/other"})))
+
+
 def test_export_symlink_refused(repo, tmp_path):
     (repo / "main.py").write_bytes(b"one = 2\n")
     result = asyncio.run(execute_review(ReviewOptions(repo=repo, preview=True), Settings()))

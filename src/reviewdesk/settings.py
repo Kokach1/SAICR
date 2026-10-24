@@ -4,10 +4,14 @@ from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 import ipaddress
+import re
 
 from pydantic import SecretStr
 
 from .contracts import EndpointPolicy, PriceTable, Settings
+
+
+_PATH_SEGMENT = re.compile(r"[A-Za-z0-9._~-]+\Z")
 
 
 def load_settings(args: Namespace, env: Mapping[str, str]) -> Settings:
@@ -50,14 +54,22 @@ def load_settings(args: Namespace, env: Mapping[str, str]) -> Settings:
 
 
 def validate_endpoint(settings: Settings) -> EndpointPolicy:
-    url = urlsplit(settings.base_url)
+    # urlsplit silently strips some ASCII whitespace; reject it before parsing
+    # so a spelling cannot be accepted under a different normalized path.
+    if any(character.isspace() for character in settings.base_url):
+        raise ValueError("Endpoint URL must not contain whitespace")
+    try:
+        url = urlsplit(settings.base_url)
+    except ValueError as exc:
+        raise ValueError("Invalid endpoint URL") from exc
     try:
         port = url.port
     except ValueError as exc:
         raise ValueError("Invalid endpoint port") from exc
     if (not url.hostname or "@" in url.netloc or url.query or url.fragment
-            or url.path not in ("", "/") or url.scheme not in ("http", "https")):
-        raise ValueError("Endpoint must be a bare HTTPS origin without credentials, query or fragment")
+            or url.scheme not in ("http", "https")):
+        raise ValueError("Endpoint must be an HTTP(S) URL without credentials, query or fragment")
+    path = _normalized_path(url.path)
     try:
         loopback = ipaddress.ip_address(url.hostname).is_loopback
     except ValueError:
@@ -66,5 +78,23 @@ def validate_endpoint(settings: Settings) -> EndpointPolicy:
         raise ValueError("HTTP requires explicit --allow-loopback-http and a loopback host")
     if not loopback and not settings.allow_hosted_upload:
         raise ValueError("Hosted upload requires --allow-hosted-upload")
-    return EndpointPolicy(base_url=settings.base_url.rstrip("/"), loopback=loopback,
+    # Retain the pre-path origin spelling for legacy bare-origin run keys.  The
+    # path is the only portion normalized, after being validated as canonical.
+    base_url = settings.base_url.rstrip("/") if not path else f"{url.scheme}://{url.netloc}{path}"
+    return EndpointPolicy(base_url=base_url, loopback=loopback,
                           upload_permitted=loopback or settings.allow_hosted_upload)
+
+
+def _normalized_path(path: str) -> str:
+    """Accept only canonical, slash-delimited unreserved path segments."""
+    if path in ("", "/"):
+        return ""
+    if path.endswith("/"):
+        path = path[:-1]
+    if not path.startswith("/") or not path:
+        raise ValueError("Endpoint path must use canonical slash-separated segments")
+    segments = path[1:].split("/")
+    if any(segment in ("", ".", "..") or not _PATH_SEGMENT.fullmatch(segment)
+           for segment in segments):
+        raise ValueError("Endpoint path must contain only unreserved, non-dot segments")
+    return path
