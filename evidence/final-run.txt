@@ -1,13 +1,14 @@
-Observed 2026-10-24, by 18:00:56 UTC, Windows / fresh Python 3.14.0 venv.
-Command: .venv/Scripts/python.exe -m pytest -q
-Expected: retained real-code tests pass; actual: 33 passed in 15.94s, exit 0.
-Command: .venv/Scripts/python.exe -m pytest -q tests/test_privacy_real.py
-Expected: actual controlled-input scanner/gate checks pass; actual: 13 passed in 0.64s, exit 0.
-Command: .venv/Scripts/python.exe fixtures/prepare_demo.py
+Observed 2026-10-25, Windows / Python 3.14.0 venv.
+Command: python -m pytest -q
+Expected: retained real-code tests pass; actual: 38 passed in 21.27s, exit 0.
+Command: python -m pytest -q tests/test_privacy_real.py
+Expected: actual controlled-input scanner/gate checks pass; actual: 16 passed in 1.71s, exit 0.
+Command: python fixtures/prepare_demo.py
 Expected: controlled Git fixture ready; actual: ready, exit 0.
-Command: .venv/Scripts/reviewdesk.exe preview --repo fixtures/demo --format json > evidence/preview.json
+Command: python -m reviewdesk preview --repo fixtures/demo --format json > evidence/preview.json
 Expected: no-model preview; actual: one included file, exit 0.
-Command: env -u LLM_BASE_URL -u LLM_MODEL -u LLM_API_KEY .venv/Scripts/reviewdesk.exe review --repo fixtures/demo
+Command: env -u LLM_BASE_URL -u LLM_MODEL -u LLM_API_KEY python -m reviewdesk review --repo fixtures/demo
 Expected: safe configuration refusal; actual: exit 2.
 Direct local scanner and gate verdicts (no HTTP) are in evidence/privacy-check.txt.
 No live model, paid or hosted call occurred. Provider/model/endpoint not configured.
+Note: pytest now passes on a fresh clone before running prepare_demo.py (FIX 1).

@@ -112,7 +112,7 @@ def test_t05_t06_redaction_and_packing():
     doc = sanitize_file(change, b"password = fakepassword123\nsafe = 1\n")
     assert doc.line_count == 2
     assert "fakepassword123" not in doc.content + doc.patch
-    assert len(doc.redactions) == 2
+    assert len(doc.redactions) == 1
     assert sanitize_file(change, b"-----BEGIN PRIVATE KEY-----\nsynthetic\n").reason == "unsafe_content"
     bundle = pack_documents([doc], Limits())[0]
     assert bundle == pack_documents([doc], Limits())[0]

@@ -42,6 +42,76 @@ def _redact(text: str, path: str, redactions: list[Redaction],
     return text
 
 
+def _redact_collecting(text: str, path: str, redactions: list[Redaction],
+                       line_numbers: dict[int, int] | None = None) -> None:
+    """Collect Redaction records without mutating text.  Raises ValueError on unsafe text."""
+    if PRIVATE.search(text):
+        raise ValueError("private_key")
+    for name, pattern in PATTERNS:
+        for match in pattern.finditer(text):
+            offset = text.count("\n", 0, match.start()) + 1
+            line = line_numbers.get(offset, offset) if line_numbers else offset
+            redactions.append(Redaction(path=safe_label(path), line=line,
+                                        rule_id=name, action="redacted"))
+    if SUSPICIOUS.search(text):
+        raise ValueError("suspicious")
+
+
+def _apply_redactions(text: str) -> str:
+    """Apply all PATTERN substitutions and raise on unsafe text (private key / suspicious)."""
+    if PRIVATE.search(text):
+        raise ValueError("private_key")
+    for _, pattern in PATTERNS:
+        text = pattern.sub("[REDACTED]", text)
+    if SUSPICIOUS.search(text):
+        raise ValueError("suspicious")
+    return text
+
+
+def _dedup_redactions(content_records: list[Redaction],
+                      patch_records: list[Redaction]) -> list[Redaction]:
+    """Pair content-scan and patch-scan records by (rule_id, within-rule ordinal).
+
+    For each rule, we have N content-scan records and M patch-scan records.
+    Pair them positionally: record i from content with record i from patch if their
+    file-line numbers agree.  If they agree, emit only the content-scan record (it
+    always carries a true file line number).  If they disagree or one side has no
+    counterpart, keep both records (fail open – losing a location is worse than noise).
+    """
+    from collections import defaultdict
+    # Group records by rule_id, preserving ordinal order within each rule.
+    def _group(records: list[Redaction]) -> dict[str, list[Redaction]]:
+        groups: dict[str, list[Redaction]] = defaultdict(list)
+        for r in records:
+            groups[r.rule_id].append(r)
+        return groups
+
+    content_by_rule = _group(content_records)
+    patch_by_rule = _group(patch_records)
+    all_rules = sorted(set(list(content_by_rule) + list(patch_by_rule)))
+
+    result: list[Redaction] = []
+    for rule in all_rules:
+        c_list = content_by_rule.get(rule, [])
+        p_list = patch_by_rule.get(rule, [])
+        n = max(len(c_list), len(p_list))
+        for i in range(n):
+            c = c_list[i] if i < len(c_list) else None
+            p = p_list[i] if i < len(p_list) else None
+            if c is not None and p is not None and c.line == p.line:
+                # Confident pair: content record has the canonical file-line number.
+                result.append(c)
+            else:
+                # Not a confident pair – keep whichever exist (fail open).
+                if c is not None:
+                    result.append(c)
+                if p is not None:
+                    result.append(p)
+    return result
+
+
+
+
 def sanitize_file(change: Change, content: bytes) -> SafeDocument | Excluded:
     path = change.path
     if sensitive(path):
@@ -49,7 +119,9 @@ def sanitize_file(change: Change, content: bytes) -> SafeDocument | Excluded:
     try:
         text = content.decode("utf-8")
         patch = "".join(h.patch for h in change.hunks)
-        patch_lines = {}
+        # Build patch-offset -> new-file-line map.  Only '+' and context (' ')
+        # lines have a target file line; '-' lines and hunk headers do not.
+        patch_lines: dict[int, int] = {}
         offset = 0
         for hunk in change.hunks:
             current = hunk.new_start
@@ -58,9 +130,15 @@ def sanitize_file(change: Change, content: bytes) -> SafeDocument | Excluded:
                 offset += 1
                 if line.startswith(("+", " ")):
                     current += 1
-        redactions: list[Redaction] = []
-        clean_content = _redact(text, path, redactions)
-        clean_patch = _redact(patch, path, redactions, patch_lines)
+        # Collect per-rule matches from content and patch separately so we can
+        # pair them by ordinal and deduplicate without using secret values.
+        content_matches: list[Redaction] = []
+        patch_matches: list[Redaction] = []
+        _redact_collecting(text, path, content_matches, line_numbers=None)
+        _redact_collecting(patch, path, patch_matches, line_numbers=patch_lines)
+        clean_content = _apply_redactions(text)
+        clean_patch = _apply_redactions(patch)
+        redactions = _dedup_redactions(content_matches, patch_matches)
     except (UnicodeError, ValueError):
         return Excluded(path=safe_label(path), reason="unsafe_content")
     return SafeDocument(path=path, content=clean_content, patch=clean_patch,

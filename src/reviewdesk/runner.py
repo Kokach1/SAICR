@@ -102,6 +102,8 @@ async def execute_review(options: ReviewOptions, config: Settings) -> RunResult:
                 errors.append(ErrorRecord(code="privacy_gate", message="Request blocked by privacy gate",
                                           bundle_id=bundle.id))
                 item = item.model_copy(update={"status": "failed", "error_code": "privacy_gate"})
+                state = _update(state, index, item)
+                save_state(cache, state)
                 break
             item = item.model_copy(update={"status": "running", "attempts": item.attempts + 1})
             state = _update(state, index, item)
