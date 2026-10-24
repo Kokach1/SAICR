@@ -64,7 +64,3 @@ Plain text output, `--help`, meaningful exit codes, severity in text rather than
 ## 9. Optional live evaluation
 
 Requires separate explicit permission for any hosted upload or paid API call, plus a user-configured compatible endpoint and model. Use only synthetic seeded defects and clean changes. Record true findings, false positives, misses, latency and known usage. Catching four of five synthetic defects is a stretch demo target, not a guaranteed outcome or passing criterion. No model availability or cost is guaranteed.
-
-## 10. Hackathon template scaffold
-
-The repository now includes the requested DevDay Kochi workflow files: `RULES.md`, `AGENTS.md`, `CHANGELOG.md`, `AI_USAGE.md`, `SUBMISSION.md`, `.github/pull_request_template.md`, and an updated `.gitignore`. Template source commit: `416329035c57c5cc82e42289bcf38d9cf5587011`. These docs do not make the project eligible for the listed event; implementation occurred on 24 October 2026 UTC after the event window, and participant/final-submission fields remain incomplete. `AI_USAGE.md` records Devin rather than Codex to keep provenance accurate.

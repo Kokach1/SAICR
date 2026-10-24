@@ -1,27 +1,10 @@
-# Local secrets; sanitized example files may be committed.
-.env
-.env.*
-!.env.example
-!.env.*.example
-*.pem
-*.key
-
-# Generated artifacts and local tooling.
-node_modules/
-.next/
-dist/
-build/
-coverage/
-.venv/
-venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
-.DS_Store
-Thumbs.db
-*.log
 *.egg-info/
-review-result.json
-
-# Synthetic nested Git fixture recreated by fixtures/prepare_demo.py.
+.venv/
+venv/
+.env
+.env.*
 fixtures/demo/
+review-result.json

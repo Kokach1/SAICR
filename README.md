@@ -46,9 +46,3 @@ Git is invoked through a fixed executable path with argv, a timeout, size limits
 `--max-tokens-budget N` is a **soft** provider-reported input-plus-output token cap. It stops subsequent sequential dispatch on the cap or on unknown usage; an in-flight call can overshoot. It is not a dollar limit, invoice or hard spend guarantee. Optional estimates require all four supplied fields: `--input-per-million RATE --output-per-million RATE --price-currency USD --price-as-of YYYY-MM-DD`. Missing rates or incomplete usage produces a null estimate. Estimates omit taxes, infrastructure and provider-specific charges. No static prices or assumed balance are included.
 
 Exit codes: `0` complete or preview (including reviews with findings), `1` partial (failed/uncertain/budget-stopped bundles), `2` invalid/unsafe configuration or snapshot, `3` checkpoint or report write failure. Errors deliberately omit raw provider messages. State is stored in the platform user cache under `reviewdesk/runs`, configurable with `REVIEWDESK_CACHE_DIR` outside the reviewed repository. See [agent.md](agent.md) for verified commands, local evidence and limitations.
-
-## Hackathon scaffold
-
-This repository also applies the DevDay Exchange Community Kochi template for workflow and submission documents. See [RULES.md](RULES.md), [AGENTS.md](AGENTS.md), [CHANGELOG.md](CHANGELOG.md), [AI_USAGE.md](AI_USAGE.md), [SUBMISSION.md](SUBMISSION.md), and [.github/pull_request_template.md](.github/pull_request_template.md). Template source: `anima-regem/devday-kochi-hackathon-template`, commit `416329035c57c5cc82e42289bcf38d9cf5587011`.
-
-**Important caveat:** this repository was implemented on 24 October 2026 UTC, after the event dates listed in `RULES.md`; it is not represented as code begun during that event. Team fields and final submitted commit selection in `SUBMISSION.md` remain for the owner to complete. No Codex usage is claimed; `AI_USAGE.md` records Devin assistance.
