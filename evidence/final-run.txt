@@ -1,8 +1,8 @@
 Observed 2026-10-25, Windows / Python 3.14.0 venv.
 Command: python -m pytest -q
-Expected: retained real-code tests pass; actual: 38 passed in 21.27s, exit 0.
+Expected: retained real-code tests pass; actual: 39 passed in 21.19s, exit 0.
 Command: python -m pytest -q tests/test_privacy_real.py
-Expected: actual controlled-input scanner/gate checks pass; actual: 16 passed in 1.71s, exit 0.
+Expected: actual controlled-input scanner/gate checks pass; actual: 17 passed in 1.77s, exit 0.
 Command: python fixtures/prepare_demo.py
 Expected: controlled Git fixture ready; actual: ready, exit 0.
 Command: python -m reviewdesk preview --repo fixtures/demo --format json > evidence/preview.json

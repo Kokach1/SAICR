@@ -21,12 +21,13 @@ from pathlib import Path
 import pytest
 
 from reviewdesk.checkpoints import load_state, save_state
-from reviewdesk.contracts import BundleState, Change, Checkpoint, Hunk, Limits, ReviewOptions, Settings
+from reviewdesk.contracts import (BundleState, Change, Checkpoint, ErrorRecord, Hunk,
+                                  Limits, ReviewOptions, Settings)
 from reviewdesk.messages import compose_message
 from reviewdesk.packing import pack_documents
 from reviewdesk.privacy import VERSION, gate_payload, sanitize_file
 from reviewdesk.revisions import capture_snapshot, find_root
-from reviewdesk.runner import _update
+from reviewdesk.runner import _record_gate_rejection
 from reviewdesk.selection import choose_files
 from reviewdesk.settings import validate_endpoint
 
@@ -183,21 +184,49 @@ def test_same_secret_on_two_lines_produces_two_records():
     assert {r.line for r in stripe_records} == {1, 2}
 
 
+def test_interleaved_rules_produce_records_ordered_by_line():
+    """Secrets matching different rule classes must be ordered by (path, line), not rule name.
+
+    stripe_live (rule 's') on line 1 and google_api (rule 'g') on line 2:
+    alphabetical rule order would emit line 2 then line 1;
+    correct file/location ordering must emit line 1 then line 2.
+    """
+    secret_stripe = "sk" + "_live_" + "1234567890ABCDEF"
+    secret_google = "AIza" + "G" * 35
+    line1 = f"s_live = '{secret_stripe}'"
+    line2 = f"g_api = '{secret_google}'"
+    content = f"{line1}\n{line2}\n".encode()
+    change = Change(path="interleaved.py", status="added", hunks=[
+        Hunk(old_start=0, old_count=0, new_start=1, new_count=2,
+             patch=f"@@ -0,0 +1,2 @@\n+{line1}\n+{line2}\n",
+             added_lines=[1, 2])])
+    doc = sanitize_file(change, content)
+    assert secret_stripe not in doc.content + doc.patch
+    assert secret_google not in doc.content + doc.patch
+    assert len(doc.redactions) == 2
+    assert [r.line for r in doc.redactions] == [1, 2]
+    assert [r.rule_id for r in doc.redactions] == ["stripe_live", "google_api"]
+
+
 # ---------------------------------------------------------------------------
-# FIX 2: Gate-rejection checkpoint persistence (function-level real execution)
+# FIX 1: Gate-rejection checkpoint persistence (production helper execution)
 # ---------------------------------------------------------------------------
-# Verification route: function-level only.
+# Verification route: function-level real execution of the production helper.
 # A CLI-level trigger for the gate ValueError path requires either (a) an oversized
 # request body (>307200 bytes) or (b) a policy with upload_permitted=False.
 # Neither is safely constructible from the current public API without additional
-# plumbing, so this is verified at function level using the real _update/save_state.
+# plumbing: oversized files are excluded at selection, packing caps bundles below
+# the gate limit, and upload_permitted=False fails endpoint validation.
+# Therefore, runner.py extracts the gate rejection sequence into _record_gate_rejection,
+# and this test exercises that exact production helper directly on a real Checkpoint.
 
 def test_gate_rejection_state_is_persisted(tmp_path):
-    """Verify that _update + save_state correctly persist the privacy_gate failed status.
+    """Verify that _record_gate_rejection persists the privacy_gate failed status.
 
-    Function-level real-execution check. Calls the actual _update and save_state code
-    (same code runner.py now calls before breaking) on a real Checkpoint in tmp_path.
-    No provider or scanner monkeypatching.
+    Function-level real-execution check. Calls the production _record_gate_rejection
+    helper (which runner.py calls in its except ValueError block) against a real
+    Checkpoint in tmp_path. Verifies both the ErrorRecord appending and durable
+    persistence via save_state / load_state round-trip.
     """
     state = Checkpoint(
         format_version="1",
@@ -216,13 +245,21 @@ def test_gate_rejection_state_is_persisted(tmp_path):
     assert loaded.bundle_states[0].status == "pending"
     assert loaded.bundle_states[0].error_code is None
 
-    # Simulate what runner.py now does on privacy_gate rejection (the fix).
+    # Call production _record_gate_rejection helper.
+    errors: list[ErrorRecord] = []
     item = state.bundle_states[0]
-    item = item.model_copy(update={"status": "failed", "error_code": "privacy_gate"})
-    state = _update(state, 0, item)
-    save_state(cache, state)
+    updated_state = _record_gate_rejection(errors, state, cache, 0, item, "bundle-001")
+
+    # Assert error record was appended.
+    assert len(errors) == 1
+    assert errors[0].code == "privacy_gate"
+    assert errors[0].message == "Request blocked by privacy gate"
+    assert errors[0].bundle_id == "bundle-001"
 
     # Reload from disk and verify durable persistence.
     reloaded = load_state(cache, state.run_id, "test_key")
     assert reloaded.bundle_states[0].status == "failed"
     assert reloaded.bundle_states[0].error_code == "privacy_gate"
+    assert updated_state.bundle_states[0].status == "failed"
+    assert updated_state.bundle_states[0].error_code == "privacy_gate"
+

@@ -4,7 +4,7 @@ Review Desk is a CLI for bounded Git changes using one explicitly configured Ope
 
 ## Setup
 
-Python 3.11+ and Git are required. The verified environment was Windows, Python 3.14.0, Git 2.52.0.windows.1, Pydantic 2.14.1, httpx 0.28.1 and pytest 9.1.1. Other platforms and Python versions have not been verified here. In a virtual environment:
+Python 3.11+ and Git are required. The verified environments were Windows (Python 3.14.0, Git 2.52.0.windows.1, Pydantic 2.14.1, httpx 0.28.1, pytest 9.1.1) and Linux (Python 3.12, fresh clone, 38 passed, verified by independent review at 5e34a4f). Other platforms and Python versions have not been verified. In a virtual environment:
 
 ```sh
 python -m pip install -e '.[test]'

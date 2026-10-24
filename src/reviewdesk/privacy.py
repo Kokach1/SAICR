@@ -25,22 +25,6 @@ SUSPICIOUS = re.compile(r"(?i)\b(?:authorization\s*:\s*bearer\s+\S+|-----BEGIN [
 LOCAL_PATH = re.compile(r"(?:[A-Za-z]:[\\/]|file://|/(?:Users|home)/[^\s]+)")
 
 
-def _redact(text: str, path: str, redactions: list[Redaction],
-            line_numbers: dict[int, int] | None = None) -> str:
-    if PRIVATE.search(text):
-        raise ValueError("private_key")
-    for name, pattern in PATTERNS:
-        matches = list(pattern.finditer(text))
-        for match in matches:
-            offset = text.count("\n", 0, match.start()) + 1
-            line = line_numbers.get(offset, offset) if line_numbers else offset
-            redactions.append(Redaction(path=safe_label(path), line=line,
-                                        rule_id=name, action="redacted"))
-        text = pattern.sub("[REDACTED]", text)
-    if SUSPICIOUS.search(text):
-        raise ValueError("suspicious")
-    return text
-
 
 def _redact_collecting(text: str, path: str, redactions: list[Redaction],
                        line_numbers: dict[int, int] | None = None) -> None:
@@ -107,9 +91,7 @@ def _dedup_redactions(content_records: list[Redaction],
                     result.append(c)
                 if p is not None:
                     result.append(p)
-    return result
-
-
+    return sorted(result, key=lambda r: (r.path, r.line))
 
 
 def sanitize_file(change: Change, content: bytes) -> SafeDocument | Excluded:

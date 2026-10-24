@@ -99,11 +99,7 @@ async def execute_review(options: ReviewOptions, config: Settings) -> RunResult:
                 payload = gate_payload(json.dumps(draft.body, ensure_ascii=True,
                                                   separators=(",", ":")).encode(), policy)
             except ValueError:
-                errors.append(ErrorRecord(code="privacy_gate", message="Request blocked by privacy gate",
-                                          bundle_id=bundle.id))
-                item = item.model_copy(update={"status": "failed", "error_code": "privacy_gate"})
-                state = _update(state, index, item)
-                save_state(cache, state)
+                state = _record_gate_rejection(errors, state, cache, index, item, bundle.id)
                 break
             item = item.model_copy(update={"status": "running", "attempts": item.attempts + 1})
             state = _update(state, index, item)
@@ -162,3 +158,32 @@ def _update(state: Checkpoint, index: int, item: BundleState) -> Checkpoint:
     items = list(state.bundle_states)
     items[index] = item
     return state.model_copy(update={"bundle_states": items, "updated_at": now()})
+
+
+def _record_gate_rejection(
+    errors: list[ErrorRecord],
+    state: Checkpoint,
+    cache,
+    index: int,
+    item: BundleState,
+    bundle_id: str,
+) -> Checkpoint:
+    """Persist the privacy-gate rejection for one bundle and record the error.
+
+    Appends an ErrorRecord (code "privacy_gate"), sets the BundleState to
+    status "failed" / error_code "privacy_gate", updates the checkpoint in
+    memory, and writes it to disk via save_state.  Returns the updated state.
+
+    This is the production function called by the runner's except ValueError
+    block.  Tests exercise this function directly to verify the persistence
+    sequence without needing an end-to-end CLI trigger.
+    """
+    errors.append(ErrorRecord(
+        code="privacy_gate",
+        message="Request blocked by privacy gate",
+        bundle_id=bundle_id,
+    ))
+    failed_item = item.model_copy(update={"status": "failed", "error_code": "privacy_gate"})
+    updated_state = _update(state, index, failed_item)
+    save_state(cache, updated_state)
+    return updated_state
